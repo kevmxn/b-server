@@ -14,7 +14,19 @@ from contextlib import asynccontextmanager
 # CONFIGURACIÓN COMPARTIDA
 # ========================================
 API_URL = "https://api-cs.casino.org/svc-evolution-game-events/api/speedbaccarata/latest"
-USER_AGENTS = [ ... ]  # (misma lista larga)
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.43 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0"
+]
+
 RESULT_EMOJIS = {"Player": "🟢", "Banker": "🔴", "Tie": "🟡"}
 
 DATA_DIR = Path("/app/baccarat_data")
@@ -60,6 +72,7 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+    print("✅ Base de datos inicializada")
 
 def get_ultimo_patron_score():
     conn = sqlite3.connect(DB_FILE)
@@ -97,7 +110,8 @@ def insert_historial(zapato_id, game_id, patron_id, patron_score, player_score, 
     conn.close()
 
 def actualizar_probabilidades(patron_id, outcome):
-    if patron_id is None: return
+    if patron_id is None:
+        return
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO Probabilidades (patron_tabla) VALUES (?)", (patron_id,))
@@ -185,11 +199,16 @@ def fetch_game_data():
         response = requests.get(API_URL, headers=headers, timeout=10)
         response.raise_for_status()
         return response.json()
-    except:
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error de conexión: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"❌ Error al parsear JSON: {e}")
         return None
 
 def process_game_data(data):
-    if not data: return None
+    if not data:
+        return None
     game_data = data.get("data", data)
     result = game_data.get("result", {})
     return {
@@ -210,10 +229,13 @@ async def collector_task():
     print("🚀 Recolector iniciado")
     while True:
         try:
+            print("🔍 Intentando obtener datos de la API...")
             raw_data = fetch_game_data()
             if raw_data:
+                print("✅ Datos crudos recibidos:", json.dumps(raw_data)[:200] + "...")  # primeros 200 chars
                 game_info = process_game_data(raw_data)
                 if game_info and game_info['game_id']:
+                    print(f"📌 Game ID: {game_info['game_id']}, Outcome: {game_info['outcome']}")
                     if not game_id_existe(game_info['game_id']):
                         patron_score_actual = game_info['player_score'] + game_info['banker_score']
                         insert_historial(
@@ -230,9 +252,15 @@ async def collector_task():
                             actualizar_probabilidades(ultimo_patron, game_info['outcome'])
                         ultimo_patron = patron_score_actual
                         set_ultimo_patron_score(ultimo_patron)
-                        print(f"✅ Nueva jugada: {game_info['outcome']} {game_info['game_id']}")
+                        print(f"✅ NUEVA JUGADA GUARDADA: {game_info['outcome']} {game_info['game_id']}")
+                    else:
+                        print("⏭️ Jugada ya existente (duplicado)")
+                else:
+                    print("⚠️ game_info es None o no tiene game_id")
+            else:
+                print("❌ No se recibieron datos de la API")
         except Exception as e:
-            print(f"Error en recolector: {e}")
+            print(f"🔥 Error en recolector: {e}")
         await asyncio.sleep(1)
 
 # ========================================
@@ -246,7 +274,7 @@ async def lifespan(app: FastAPI):
     try:
         await task
     except asyncio.CancelledError:
-        pass
+        print("🛑 Recolector detenido")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -262,13 +290,16 @@ async def get_html():
 
 @app.get("/api/history")
 async def api_history(limit: int = 100):
+    print(f"📊 Petición a /api/history con limit={limit}")
     return get_latest_games(limit)
 
 @app.get("/api/probabilities")
 async def api_probabilities():
+    print("📊 Petición a /api/probabilities")
     return get_probabilidades()
 
 @app.get("/api/latest")
 async def api_latest():
+    print("📊 Petición a /api/latest")
     games = get_latest_games(1)
     return games[0] if games else {}
