@@ -6,7 +6,7 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from contextlib import asynccontextmanager
 
@@ -22,7 +22,7 @@ DATA_DIR.mkdir(exist_ok=True)
 DB_FILE = DATA_DIR / "baccarat.db"
 
 # ========================================
-# FUNCIONES DE BASE DE DATOS (reutilizadas)
+# FUNCIONES DE BASE DE DATOS
 # ========================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -144,6 +144,28 @@ def get_latest_games(limit=100):
         })
     return list(reversed(games))
 
+def get_probabilidades():
+    if not DB_FILE.exists():
+        return []
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM Probabilidades ORDER BY patron_tabla")
+    rows = cursor.fetchall()
+    conn.close()
+    probs = []
+    for row in rows:
+        probs.append({
+            "patron_tabla": row[0],
+            "patron_player": row[1],
+            "patron_banker": row[2],
+            "patron_tie": row[3],
+            "patron_total": row[4],
+            "prob_player": row[5],
+            "prob_banker": row[6],
+            "prob_tie": row[7]
+        })
+    return probs
+
 # ========================================
 # FUNCIONES DEL RECOLECTOR
 # ========================================
@@ -180,34 +202,9 @@ def process_game_data(data):
     }
 
 # ========================================
-# GESTOR DE WEBSOCKET Y VARIABLE GLOBAL
-# ========================================
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except:
-                pass
-
-manager = ConnectionManager()
-last_game_id = None
-
-# ========================================
 # TAREA DE FONDO: RECOLECTOR
 # ========================================
 async def collector_task():
-    global last_game_id
     init_db()
     ultimo_patron = get_ultimo_patron_score()
     print("🚀 Recolector iniciado")
@@ -233,22 +230,7 @@ async def collector_task():
                             actualizar_probabilidades(ultimo_patron, game_info['outcome'])
                         ultimo_patron = patron_score_actual
                         set_ultimo_patron_score(ultimo_patron)
-                        last_game_id = game_info['game_id']
-                        # Notificar a todos los clientes WebSocket
-                        await manager.broadcast(json.dumps({
-                            "type": "new_game",
-                            "data": {
-                                "zapato_id": game_info['shoe_id'],
-                                "game_id": game_info['game_id'],
-                                "patron_id": ultimo_patron,
-                                "patron_score": patron_score_actual,
-                                "player_score": game_info['player_score'],
-                                "banker_score": game_info['banker_score'],
-                                "outcome": game_info['outcome'],
-                                "started_at": game_info['started_at']
-                            }
-                        }))
-                        print(f"✅ Nueva jugada: {game_info['outcome']}")
+                        print(f"✅ Nueva jugada: {game_info['outcome']} {game_info['game_id']}")
         except Exception as e:
             print(f"Error en recolector: {e}")
         await asyncio.sleep(1)
@@ -258,10 +240,8 @@ async def collector_task():
 # ========================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Iniciar tarea del recolector
     task = asyncio.create_task(collector_task())
     yield
-    # Cancelar al cerrar
     task.cancel()
     try:
         await task
@@ -271,7 +251,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # ========================================
-# RUTAS DEL SERVIDOR WEB
+# ENDPOINTS REST
 # ========================================
 @app.get("/", response_class=HTMLResponse)
 async def get_html():
@@ -280,14 +260,15 @@ async def get_html():
         return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>index.html no encontrado</h1>", status_code=404)
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        # Enviar historial al conectar
-        games = get_latest_games(limit=100)
-        await websocket.send_text(json.dumps({"type": "history", "data": games}))
-        while True:
-            await websocket.receive_text()  # solo mantener conexión
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+@app.get("/api/history")
+async def api_history(limit: int = 100):
+    return get_latest_games(limit)
+
+@app.get("/api/probabilities")
+async def api_probabilities():
+    return get_probabilidades()
+
+@app.get("/api/latest")
+async def api_latest():
+    games = get_latest_games(1)
+    return games[0] if games else {}
