@@ -284,8 +284,13 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/", response_class=HTMLResponse)
 async def get_html():
     html_path = Path(__file__).parent / "index.html"
+    print(f"📁 Intentando servir index.html desde: {html_path}")
+    print(f"📁 ¿Existe? {html_path.exists()}")
     if html_path.exists():
-        return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+        content = html_path.read_text(encoding="utf-8")
+        print(f"📄 Tamaño del archivo: {len(content)} bytes")
+        return HTMLResponse(content=content)
+    print("❌ index.html NO ENCONTRADO")
     return HTMLResponse("<h1>index.html no encontrado</h1>", status_code=404)
 
 @app.get("/api/history")
