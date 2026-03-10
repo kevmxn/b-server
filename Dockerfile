@@ -2,18 +2,15 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Copiar dependencias e instalarlas
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el script
-COPY baccarat.py .
+COPY main.py .
+COPY index.html .
 
-# Crear directorio para la base de datos
 RUN mkdir -p /app/baccarat_data
 
-# Volumen para persistencia
-VOLUME /app/baccarat_data
+# Expone el puerto que usará Render
+EXPOSE 10000
 
-# Ejecutar el script
-CMD ["python", "baccarat.py"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
