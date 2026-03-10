@@ -343,362 +343,364 @@
     </div>
 
     <script>
-        (function() {
-            // ---------- CONSTANTES ----------
-            const SEQUENCE = [
-                "BANKER", "PLAYER", "BANKER", "BANKER", "PLAYER", "PLAYER",
-                "BANKER", "PLAYER", "BANKER", "BANKER", "PLAYER", "PLAYER",
-                "BANKER", "PLAYER", "BANKER"
-            ];
-            const CHIPS_PER_ATTEMPT = [1, 2, 4, 8, 16];
-            const MAX_ATTEMPTS = 5;
-
-            // ---------- ESTADO DE LA APLICACIÓN ----------
-            let spinHistory = [];
-            let originalLevels = [];   // para BANKER
-            let invertedLevels = [];    // para PLAYER
-
-            let sequenceIndex = 0;
-            let currentAttempt = 1;
-            let signalActive = false;
-            let stats = { total: 0, won: 0, lost: 0 };
-            let resultState = { active: false, type: null, endTime: 0, attempt: null };
-            let resultTimeout = null;
-
-            let spinCount = 0;
-            const minSpinsBeforeSignal = 20;
-            let waitingForFirstPlayer = true;
-
-            // Elementos DOM
-            const totalSpinsSpan = document.getElementById('totalSpins');
-            const visibleSpan = document.getElementById('visibleCount');
-            const historyBalls = document.getElementById('historyBalls');
-            const statTotal = document.getElementById('statTotal');
-            const statWon = document.getElementById('statWon');
-            const statLost = document.getElementById('statLost');
-            const statHit = document.getElementById('statHit');
-            const connectionLed = document.getElementById('connectionLed');
-            const connectionText = document.getElementById('connectionText');
-            const signalAlert = document.getElementById('signalAlert');
-            const alertMessage = document.getElementById('alertMessage');
-            const alertAttempt = document.getElementById('alertAttempt');
-            const alertChips = document.getElementById('alertChips');
-            const alertsContainer = document.getElementById('alertsContainer');
-            const resultCircle = document.getElementById('resultCircle');
-            const resultText = document.getElementById('resultText');
-            const resultAttempt = document.getElementById('resultAttempt');
-            const lastUpdateTimeSpan = document.getElementById('lastUpdateTime');
-
-            let visibleLength = 40;
-            let chartBanker, chartPlayer;
-
-            // ---------- FUNCIONES DE PROCESAMIENTO ----------
-            function processOutcome(data) {
-                const outcome = data.outcome;  // "Player", "Banker", "Tie"
-                const playerScore = data.player_score || 0;
-                const bankerScore = data.banker_score || 0;
-                const gameId = data.game_id;
-                const zapatoId = data.zapato_id;
-                const startedAt = data.started_at;
-
-                let color = "TIE";
-                if (outcome === "Banker") color = "BANKER";
-                else if (outcome === "Player") color = "PLAYER";
-
-                spinHistory.push({ outcome, color, playerScore, bankerScore, gameId, zapatoId, startedAt });
-                if (spinHistory.length > 300) spinHistory.shift();
-
-                spinCount++;
-
-                let lastOrig = originalLevels.length ? originalLevels[originalLevels.length-1] : 0;
-                let lastInv = invertedLevels.length ? invertedLevels[invertedLevels.length-1] : 0;
-
-                if (outcome === "Tie") {
-                    originalLevels.push(lastOrig);
-                    invertedLevels.push(lastInv);
-                } else {
-                    let changeOrig = (outcome === "Banker") ? 1 : -1;
-                    let changeInv = (outcome === "Player") ? 1 : -1;
-                    originalLevels.push(lastOrig + changeOrig);
-                    invertedLevels.push(lastInv + changeInv);
+    (function() {
+        // ---------- CONSTANTES ----------
+        const SEQUENCE = [
+            "BANKER", "PLAYER", "BANKER", "BANKER", "PLAYER", "PLAYER",
+            "BANKER", "PLAYER", "BANKER", "BANKER", "PLAYER", "PLAYER",
+            "BANKER", "PLAYER", "BANKER"
+        ];
+        const CHIPS_PER_ATTEMPT = [1, 2, 4, 8, 16];
+        const MAX_ATTEMPTS = 5;
+    
+        // ---------- ESTADO DE LA APLICACIÓN ----------
+        let spinHistory = [];
+        let originalLevels = [];   // para BANKER
+        let invertedLevels = [];    // para PLAYER
+        let processedGameIds = new Set(); // <-- NUEVO: conjunto de IDs ya procesados
+    
+        let sequenceIndex = 0;
+        let currentAttempt = 1;
+        let signalActive = false;
+        let stats = { total: 0, won: 0, lost: 0 };
+        let resultState = { active: false, type: null, endTime: 0, attempt: null };
+        let resultTimeout = null;
+    
+        let spinCount = 0;
+        const minSpinsBeforeSignal = 20;
+        let waitingForFirstPlayer = true;
+    
+        // Elementos DOM
+        const totalSpinsSpan = document.getElementById('totalSpins');
+        const visibleSpan = document.getElementById('visibleCount');
+        const historyBalls = document.getElementById('historyBalls');
+        const statTotal = document.getElementById('statTotal');
+        const statWon = document.getElementById('statWon');
+        const statLost = document.getElementById('statLost');
+        const statHit = document.getElementById('statHit');
+        const connectionLed = document.getElementById('connectionLed');
+        const connectionText = document.getElementById('connectionText');
+        const signalAlert = document.getElementById('signalAlert');
+        const alertMessage = document.getElementById('alertMessage');
+        const alertAttempt = document.getElementById('alertAttempt');
+        const alertChips = document.getElementById('alertChips');
+        const alertsContainer = document.getElementById('alertsContainer');
+        const resultCircle = document.getElementById('resultCircle');
+        const resultText = document.getElementById('resultText');
+        const resultAttempt = document.getElementById('resultAttempt');
+        const lastUpdateTimeSpan = document.getElementById('lastUpdateTime');
+    
+        let visibleLength = 40;
+        let chartBanker, chartPlayer;
+    
+        // ---------- FUNCIONES DE PROCESAMIENTO ----------
+        function processOutcome(data) {
+            const outcome = data.outcome;  // "Player", "Banker", "Tie"
+            const playerScore = data.player_score || 0;
+            const bankerScore = data.banker_score || 0;
+            const gameId = data.game_id;
+            const zapatoId = data.zapato_id;
+            const startedAt = data.started_at;
+    
+            // Si el ID ya fue procesado, salir (doble seguridad)
+            if (processedGameIds.has(gameId)) return;
+            processedGameIds.add(gameId);
+    
+            let color = "TIE";
+            if (outcome === "Banker") color = "BANKER";
+            else if (outcome === "Player") color = "PLAYER";
+    
+            spinHistory.push({ outcome, color, playerScore, bankerScore, gameId, zapatoId, startedAt });
+            if (spinHistory.length > 300) {
+                const removed = spinHistory.shift();
+                // Opcional: eliminar su ID del set si quieres mantener el set sincronizado,
+                // pero no es necesario porque el límite es alto y los IDs antiguos no volverán.
+            }
+    
+            spinCount++;
+    
+            let lastOrig = originalLevels.length ? originalLevels[originalLevels.length-1] : 0;
+            let lastInv = invertedLevels.length ? invertedLevels[invertedLevels.length-1] : 0;
+    
+            if (outcome === "Tie") {
+                originalLevels.push(lastOrig);
+                invertedLevels.push(lastInv);
+            } else {
+                let changeOrig = (outcome === "Banker") ? 1 : -1;
+                let changeInv = (outcome === "Player") ? 1 : -1;
+                originalLevels.push(lastOrig + changeOrig);
+                invertedLevels.push(lastInv + changeInv);
+            }
+    
+            while (originalLevels.length > spinHistory.length) originalLevels.shift();
+            while (invertedLevels.length > spinHistory.length) invertedLevels.shift();
+    
+            // Lógica de señales
+            if (spinCount < minSpinsBeforeSignal) return;
+    
+            if (spinCount >= minSpinsBeforeSignal && waitingForFirstPlayer) {
+                if (outcome === "Player") {
+                    waitingForFirstPlayer = false;
+                    signalActive = true;
+                    currentAttempt = 1;
+                    sequenceIndex = 0;
+                    console.log("Primer PLAYER detectado. Señales activadas.");
                 }
-
-                while (originalLevels.length > spinHistory.length) originalLevels.shift();
-                while (invertedLevels.length > spinHistory.length) invertedLevels.shift();
-
-                // Lógica de señales
-                if (spinCount < minSpinsBeforeSignal) return;
-
-                if (spinCount >= minSpinsBeforeSignal && waitingForFirstPlayer) {
-                    if (outcome === "Player") {
-                        waitingForFirstPlayer = false;
-                        signalActive = true;
-                        currentAttempt = 1;
-                        sequenceIndex = 0;
-                        console.log("Primer PLAYER detectado. Señales activadas.");
-                    }
-                    return;
-                }
-
-                if (!signalActive) return;
-
-                const expectedColor = SEQUENCE[sequenceIndex];
-                const isWin = (expectedColor === color);
-
-                showResult(isWin ? 'win' : 'loss', currentAttempt);
-
-                if (isWin) {
-                    stats.won++;
+                return;
+            }
+    
+            if (!signalActive) return;
+    
+            const expectedColor = SEQUENCE[sequenceIndex];
+            const isWin = (expectedColor === color);
+    
+            showResult(isWin ? 'win' : 'loss', currentAttempt);
+    
+            if (isWin) {
+                stats.won++;
+                stats.total++;
+                currentAttempt = 1;
+            } else {
+                if (currentAttempt >= MAX_ATTEMPTS) {
+                    stats.lost++;
                     stats.total++;
                     currentAttempt = 1;
                 } else {
-                    if (currentAttempt >= MAX_ATTEMPTS) {
-                        stats.lost++;
-                        stats.total++;
-                        currentAttempt = 1;
-                    } else {
-                        currentAttempt++;
-                    }
-                }
-
-                sequenceIndex = (sequenceIndex + 1) % SEQUENCE.length;
-            }
-
-            function showResult(type, attempt) {
-                if (resultTimeout) clearTimeout(resultTimeout);
-                resultState.active = true;
-                resultState.type = type;
-                resultState.attempt = attempt;
-                resultState.endTime = Date.now() + 7000;
-
-                updateSignalAlert();
-
-                resultTimeout = setTimeout(() => {
-                    if (Date.now() >= resultState.endTime) {
-                        resultState.active = false;
-                        updateSignalAlert();
-                    }
-                }, 7000);
-            }
-
-            function updateSignalAlert() {
-                if (signalActive && SEQUENCE[sequenceIndex]) {
-                    alertAttempt.textContent = `Intento ${currentAttempt}/${MAX_ATTEMPTS}`;
-                    alertMessage.textContent = SEQUENCE[sequenceIndex];
-                    const chips = CHIPS_PER_ATTEMPT[currentAttempt - 1];
-                    alertChips.textContent = `${chips} Ficha${chips > 1 ? 's' : ''}`;
-                    signalAlert.classList.remove('hidden', 'blink-red', 'blink-blue');
-                    if (SEQUENCE[sequenceIndex] === 'BANKER') {
-                        signalAlert.classList.add('blink-red');
-                    } else {
-                        signalAlert.classList.add('blink-blue');
-                    }
-                } else {
-                    signalAlert.classList.add('hidden');
-                }
-
-                if (resultState.active) {
-                    resultCircle.classList.remove('hidden', 'blink-green', 'blink-red');
-                    resultAttempt.textContent = `Intento ${resultState.attempt}/${MAX_ATTEMPTS}`;
-                    if (resultState.type === 'win') {
-                        resultText.textContent = 'WIN';
-                        resultCircle.classList.add('blink-green');
-                    } else {
-                        resultText.textContent = 'LOSS';
-                        resultCircle.classList.add('blink-red');
-                    }
-                } else {
-                    resultCircle.classList.add('hidden');
-                }
-
-                if ((signalActive && SEQUENCE[sequenceIndex]) || resultState.active) {
-                    alertsContainer.classList.remove('hidden');
-                } else {
-                    alertsContainer.classList.add('hidden');
+                    currentAttempt++;
                 }
             }
-
-            function calculateEMA(data, period) {
-                if (data.length < period) return new Array(data.length).fill(null);
-                let ema = [];
-                let multiplier = 2 / (period + 1);
-                let sum = 0;
-                for (let i = 0; i < period; i++) sum += data[i];
-                let prevEma = sum / period;
-                for (let i = 0; i < period-1; i++) ema.push(null);
+    
+            sequenceIndex = (sequenceIndex + 1) % SEQUENCE.length;
+        }
+    
+        function showResult(type, attempt) {
+            if (resultTimeout) clearTimeout(resultTimeout);
+            resultState.active = true;
+            resultState.type = type;
+            resultState.attempt = attempt;
+            resultState.endTime = Date.now() + 7000;
+    
+            updateSignalAlert();
+    
+            resultTimeout = setTimeout(() => {
+                if (Date.now() >= resultState.endTime) {
+                    resultState.active = false;
+                    updateSignalAlert();
+                }
+            }, 7000);
+        }
+    
+        function updateSignalAlert() {
+            if (signalActive && SEQUENCE[sequenceIndex]) {
+                alertAttempt.textContent = `Intento ${currentAttempt}/${MAX_ATTEMPTS}`;
+                alertMessage.textContent = SEQUENCE[sequenceIndex];
+                const chips = CHIPS_PER_ATTEMPT[currentAttempt - 1];
+                alertChips.textContent = `${chips} Ficha${chips > 1 ? 's' : ''}`;
+                signalAlert.classList.remove('hidden', 'blink-red', 'blink-blue');
+                if (SEQUENCE[sequenceIndex] === 'BANKER') {
+                    signalAlert.classList.add('blink-red');
+                } else {
+                    signalAlert.classList.add('blink-blue');
+                }
+            } else {
+                signalAlert.classList.add('hidden');
+            }
+    
+            if (resultState.active) {
+                resultCircle.classList.remove('hidden', 'blink-green', 'blink-red');
+                resultAttempt.textContent = `Intento ${resultState.attempt}/${MAX_ATTEMPTS}`;
+                if (resultState.type === 'win') {
+                    resultText.textContent = 'WIN';
+                    resultCircle.classList.add('blink-green');
+                } else {
+                    resultText.textContent = 'LOSS';
+                    resultCircle.classList.add('blink-red');
+                }
+            } else {
+                resultCircle.classList.add('hidden');
+            }
+    
+            if ((signalActive && SEQUENCE[sequenceIndex]) || resultState.active) {
+                alertsContainer.classList.remove('hidden');
+            } else {
+                alertsContainer.classList.add('hidden');
+            }
+        }
+    
+        function calculateEMA(data, period) {
+            if (data.length < period) return new Array(data.length).fill(null);
+            let ema = [];
+            let multiplier = 2 / (period + 1);
+            let sum = 0;
+            for (let i = 0; i < period; i++) sum += data[i];
+            let prevEma = sum / period;
+            for (let i = 0; i < period-1; i++) ema.push(null);
+            ema.push(prevEma);
+            for (let i = period; i < data.length; i++) {
+                prevEma = (data[i] - prevEma) * multiplier + prevEma;
                 ema.push(prevEma);
-                for (let i = period; i < data.length; i++) {
-                    prevEma = (data[i] - prevEma) * multiplier + prevEma;
-                    ema.push(prevEma);
-                }
-                return ema;
             }
-
-            function updateUI() {
-                totalSpinsSpan.innerText = spinHistory.length;
-                visibleSpan.innerText = Math.min(visibleLength, spinHistory.length);
-
-                const last20 = spinHistory.slice(-20).reverse();
-                historyBalls.innerHTML = '';
-                if (last20.length === 0) {
-                    historyBalls.innerHTML = '<span style="opacity:0.5;">Esperando resultados...</span>';
-                } else {
-                    last20.forEach(item => {
-                        const ball = document.createElement('div');
-                        if (item.outcome === 'Banker') ball.className = 'ball banker';
-                        else if (item.outcome === 'Player') ball.className = 'ball player';
-                        else ball.className = 'ball tie';
-                        ball.textContent = item.outcome === 'Banker' ? `B${item.bankerScore}` : 
-                                          (item.outcome === 'Player' ? `P${item.playerScore}` : 'TIE');
-                        historyBalls.appendChild(ball);
-                    });
-                }
-
-                statTotal.innerText = stats.total;
-                statWon.innerText = stats.won;
-                statLost.innerText = stats.lost;
-                let hit = stats.total ? ((stats.won / stats.total)*100).toFixed(1) : 0;
-                statHit.innerText = hit + '%';
-
-                const visibleOrig = originalLevels.slice(-visibleLength);
-                const visibleInv = invertedLevels.slice(-visibleLength);
-                const labels = Array.from({length: visibleOrig.length}, (_,i) => i+1);
-                const fullEmaOrig = calculateEMA(originalLevels, 20);
-                const fullEmaInv = calculateEMA(invertedLevels, 20);
-                const visibleEmaOrig = fullEmaOrig.slice(-visibleLength);
-                const visibleEmaInv = fullEmaInv.slice(-visibleLength);
-
-                if (chartBanker) {
-                    chartBanker.data.labels = labels;
-                    chartBanker.data.datasets[0].data = visibleOrig;
-                    chartBanker.data.datasets[1].data = visibleEmaOrig;
-                    chartBanker.update();
-                }
-                if (chartPlayer) {
-                    chartPlayer.data.labels = labels;
-                    chartPlayer.data.datasets[0].data = visibleInv;
-                    chartPlayer.data.datasets[1].data = visibleEmaInv;
-                    chartPlayer.update();
-                }
-
-                let connectionStatus = '';
-                let ledClass = 'led red';
-                if (spinCount < minSpinsBeforeSignal) {
-                    const remaining = minSpinsBeforeSignal - spinCount;
-                    connectionStatus = `Cargando historial (${remaining} giros para activar)`;
-                    ledClass = 'led yellow';
-                } else if (waitingForFirstPlayer) {
-                    connectionStatus = `Giro ${spinCount} - Esperando primer PLAYER...`;
-                    ledClass = 'led yellow';
-                } else if (signalActive) {
-                    connectionStatus = 'Señales ACTIVAS';
-                    ledClass = 'led green';
-                } else {
-                    connectionStatus = 'Conectado';
-                    ledClass = 'led green';
-                }
-
-                connectionLed.className = ledClass;
-                connectionText.innerText = connectionStatus;
-
-                updateSignalAlert();
+            return ema;
+        }
+    
+        function updateUI() {
+            totalSpinsSpan.innerText = spinHistory.length;
+            visibleSpan.innerText = Math.min(visibleLength, spinHistory.length);
+    
+            const last20 = spinHistory.slice(-20).reverse();
+            historyBalls.innerHTML = '';
+            if (last20.length === 0) {
+                historyBalls.innerHTML = '<span style="opacity:0.5;">Esperando resultados...</span>';
+            } else {
+                last20.forEach(item => {
+                    const ball = document.createElement('div');
+                    if (item.outcome === 'Banker') ball.className = 'ball banker';
+                    else if (item.outcome === 'Player') ball.className = 'ball player';
+                    else ball.className = 'ball tie';
+                    ball.textContent = item.outcome === 'Banker' ? `B${item.bankerScore}` : 
+                                      (item.outcome === 'Player' ? `P${item.playerScore}` : 'TIE');
+                    historyBalls.appendChild(ball);
+                });
             }
-
-            // ---------- POLLING A LA API ----------
-            async function fetchLatest() {
-                try {
-                    const response = await fetch('/api/history?limit=100');
-                    if (!response.ok) return;
-                    const games = await response.json();
-                    if (games.length > 0) {
-                        const lastKnown = spinHistory.length > 0 ? spinHistory[spinHistory.length-1].game_id : null;
-                        let newGames = [];
-                        if (lastKnown) {
-                            const lastIndex = games.findIndex(g => g.game_id === lastKnown);
-                            if (lastIndex !== -1) {
-                                newGames = games.slice(lastIndex + 1);
-                            } else {
-                                newGames = games;
-                            }
-                        } else {
-                            newGames = games;
-                        }
-                        newGames.forEach(game => processOutcome(game));
+    
+            statTotal.innerText = stats.total;
+            statWon.innerText = stats.won;
+            statLost.innerText = stats.lost;
+            let hit = stats.total ? ((stats.won / stats.total)*100).toFixed(1) : 0;
+            statHit.innerText = hit + '%';
+    
+            const visibleOrig = originalLevels.slice(-visibleLength);
+            const visibleInv = invertedLevels.slice(-visibleLength);
+            const labels = Array.from({length: visibleOrig.length}, (_,i) => i+1);
+            const fullEmaOrig = calculateEMA(originalLevels, 20);
+            const fullEmaInv = calculateEMA(invertedLevels, 20);
+            const visibleEmaOrig = fullEmaOrig.slice(-visibleLength);
+            const visibleEmaInv = fullEmaInv.slice(-visibleLength);
+    
+            if (chartBanker) {
+                chartBanker.data.labels = labels;
+                chartBanker.data.datasets[0].data = visibleOrig;
+                chartBanker.data.datasets[1].data = visibleEmaOrig;
+                chartBanker.update();
+            }
+            if (chartPlayer) {
+                chartPlayer.data.labels = labels;
+                chartPlayer.data.datasets[0].data = visibleInv;
+                chartPlayer.data.datasets[1].data = visibleEmaInv;
+                chartPlayer.update();
+            }
+    
+            let connectionStatus = '';
+            let ledClass = 'led red';
+            if (spinCount < minSpinsBeforeSignal) {
+                const remaining = minSpinsBeforeSignal - spinCount;
+                connectionStatus = `Cargando historial (${remaining} giros para activar)`;
+                ledClass = 'led yellow';
+            } else if (waitingForFirstPlayer) {
+                connectionStatus = `Giro ${spinCount} - Esperando primer PLAYER...`;
+                ledClass = 'led yellow';
+            } else if (signalActive) {
+                connectionStatus = 'Señales ACTIVAS';
+                ledClass = 'led green';
+            } else {
+                connectionStatus = 'Conectado';
+                ledClass = 'led green';
+            }
+    
+            connectionLed.className = ledClass;
+            connectionText.innerText = connectionStatus;
+    
+            updateSignalAlert();
+        }
+    
+        // ---------- POLLING A LA API ----------
+        async function fetchLatest() {
+            try {
+                const response = await fetch('/api/history?limit=100');
+                if (!response.ok) return;
+                const games = await response.json();
+                if (games.length > 0) {
+                    // Filtrar solo los juegos que no hemos procesado aún
+                    const newGames = games.filter(game => !processedGameIds.has(game.game_id));
+                    // Procesar cada nuevo juego en orden (vienen ordenados cronológicamente)
+                    newGames.forEach(game => processOutcome(game));
+                    if (newGames.length > 0) {
                         updateUI();
                     }
-                } catch (e) {
-                    console.error('Error fetching data:', e);
                 }
+            } catch (e) {
+                console.error('Error fetching data:', e);
+            }
+            lastUpdateTimeSpan.textContent = new Date().toLocaleTimeString('es-ES', {hour12:false});
+        }
+    
+        // ---------- INICIALIZACIÓN ----------
+        function initCharts() {
+            const ctxBanker = document.getElementById('chartRojo').getContext('2d');
+            const ctxPlayer = document.getElementById('chartNegro').getContext('2d');
+    
+            chartBanker = new Chart(ctxBanker, {
+                type: 'line',
+                data: { labels: [], datasets: [
+                    { label: 'Nivel BANKER', data: [], borderColor: '#ffb0b0', backgroundColor: 'rgba(255,140,140,0.1)', tension: 0.1, pointRadius: 4,
+                      pointBackgroundColor: (ctx) => {
+                          const idx = ctx.dataIndex;
+                          const total = spinHistory.length;
+                          if (total === 0) return '#fff';
+                          const offset = Math.max(0, total - visibleLength);
+                          const realIdx = offset + idx;
+                          if (realIdx < 0 || realIdx >= total) return '#fff';
+                          const item = spinHistory[realIdx];
+                          if (!item) return '#fff';
+                          if (item.outcome === 'Tie') return '#5fd17c';
+                          return item.outcome === 'Banker' ? '#ff6b6b' : '#6ca0ff';
+                      } },
+                    { label: 'EMA 20', data: [], borderColor: '#ff4d4d', borderWidth: 2.5, pointRadius: 0, fill: false, tension: 0.1 }
+                ]},
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+    
+            chartPlayer = new Chart(ctxPlayer, {
+                type: 'line',
+                data: { labels: [], datasets: [
+                    { label: 'Nivel PLAYER', data: [], borderColor: '#6ca0ff', backgroundColor: 'rgba(100,160,255,0.1)', tension: 0.1, pointRadius: 4,
+                      pointBackgroundColor: (ctx) => {
+                          const idx = ctx.dataIndex;
+                          const total = spinHistory.length;
+                          if (total === 0) return '#fff';
+                          const offset = Math.max(0, total - visibleLength);
+                          const realIdx = offset + idx;
+                          if (realIdx < 0 || realIdx >= total) return '#fff';
+                          const item = spinHistory[realIdx];
+                          if (!item) return '#fff';
+                          if (item.outcome === 'Tie') return '#5fd17c';
+                          return item.outcome === 'Player' ? '#6ca0ff' : '#ff8888';
+                      } },
+                    { label: 'EMA 20', data: [], borderColor: '#a0b0c0', borderWidth: 2.5, pointRadius: 0, fill: false, tension: 0.1 }
+                ]},
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+        }
+    
+        document.querySelectorAll('.vis-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.vis-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                visibleLength = parseInt(this.dataset.length);
+                updateUI();
+            });
+        });
+    
+        setInterval(fetchLatest, 3000);
+    
+        window.addEventListener('load', () => {
+            initCharts();
+            fetchLatest();
+            setInterval(() => {
                 lastUpdateTimeSpan.textContent = new Date().toLocaleTimeString('es-ES', {hour12:false});
-            }
-
-            // ---------- INICIALIZACIÓN ----------
-            function initCharts() {
-                const ctxBanker = document.getElementById('chartRojo').getContext('2d');
-                const ctxPlayer = document.getElementById('chartNegro').getContext('2d');
-
-                chartBanker = new Chart(ctxBanker, {
-                    type: 'line',
-                    data: { labels: [], datasets: [
-                        { label: 'Nivel BANKER', data: [], borderColor: '#ffb0b0', backgroundColor: 'rgba(255,140,140,0.1)', tension: 0.1, pointRadius: 4,
-                          pointBackgroundColor: (ctx) => {
-                              const idx = ctx.dataIndex;
-                              const total = spinHistory.length;
-                              if (total === 0) return '#fff';
-                              const offset = Math.max(0, total - visibleLength);
-                              const realIdx = offset + idx;
-                              if (realIdx < 0 || realIdx >= total) return '#fff';
-                              const item = spinHistory[realIdx];
-                              if (!item) return '#fff';
-                              if (item.outcome === 'Tie') return '#5fd17c';
-                              return item.outcome === 'Banker' ? '#ff6b6b' : '#6ca0ff';
-                          } },
-                        { label: 'EMA 20', data: [], borderColor: '#ff4d4d', borderWidth: 2.5, pointRadius: 0, fill: false, tension: 0.1 }
-                    ]},
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-                });
-
-                chartPlayer = new Chart(ctxPlayer, {
-                    type: 'line',
-                    data: { labels: [], datasets: [
-                        { label: 'Nivel PLAYER', data: [], borderColor: '#6ca0ff', backgroundColor: 'rgba(100,160,255,0.1)', tension: 0.1, pointRadius: 4,
-                          pointBackgroundColor: (ctx) => {
-                              const idx = ctx.dataIndex;
-                              const total = spinHistory.length;
-                              if (total === 0) return '#fff';
-                              const offset = Math.max(0, total - visibleLength);
-                              const realIdx = offset + idx;
-                              if (realIdx < 0 || realIdx >= total) return '#fff';
-                              const item = spinHistory[realIdx];
-                              if (!item) return '#fff';
-                              if (item.outcome === 'Tie') return '#5fd17c';
-                              return item.outcome === 'Player' ? '#6ca0ff' : '#ff8888';
-                          } },
-                        { label: 'EMA 20', data: [], borderColor: '#a0b0c0', borderWidth: 2.5, pointRadius: 0, fill: false, tension: 0.1 }
-                    ]},
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-                });
-            }
-
-            document.querySelectorAll('.vis-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    document.querySelectorAll('.vis-btn').forEach(b => b.classList.remove('active'));
-                    this.classList.add('active');
-                    visibleLength = parseInt(this.dataset.length);
-                    updateUI();
-                });
-            });
-
-            setInterval(fetchLatest, 3000);
-
-            window.addEventListener('load', () => {
-                initCharts();
-                fetchLatest();
-                setInterval(() => {
-                    lastUpdateTimeSpan.textContent = new Date().toLocaleTimeString('es-ES', {hour12:false});
-                }, 1000);
-            });
-        })();
+            }, 1000);
+        });
+    })();
     </script>
 </body>
 </html>
